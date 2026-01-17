@@ -6,10 +6,10 @@ import { BaseTool } from "../base-tool";
  * Data structure for final answer tool.
  */
 export interface FinalAnswerToolData {
-  reasoning: string;
-  completedSteps: string[];
-  answer: string;
-  status: AgentStatesEnum.COMPLETED | AgentStatesEnum.FAILED;
+  reasoning?: string;
+  completedSteps?: string[];
+  answer?: string;
+  status?: AgentStatesEnum.COMPLETED | AgentStatesEnum.FAILED;
 }
 
 /**
@@ -26,48 +26,49 @@ export class FinalAnswerTool implements BaseTool {
     data: FinalAnswerToolData | any
   ): Promise<string> {
     // Handle different data structures (some LLMs return nested structures)
-    let finalData: FinalAnswerToolData;
+    let rawReasoning: string | undefined;
+    let rawCompletedSteps: string[] | undefined;
+    let rawAnswer: string | undefined;
+    let rawStatus: AgentStatesEnum.COMPLETED | AgentStatesEnum.FAILED | undefined;
     
     if (data && data.arguments && typeof data.arguments === 'object') {
       // Handle nested structure: { arguments: { answer: "...", ... } }
       const args = data.arguments;
-      finalData = {
-        reasoning: args.reasoning || "Task completed",
-        completedSteps: args.completedSteps || args.completed_steps || ["Completed"],
-        answer: args.answer || "",
-        status: args.status || AgentStatesEnum.COMPLETED,
-      };
+      rawReasoning = args.reasoning;
+      rawCompletedSteps = args.completedSteps || args.completed_steps;
+      rawAnswer = args.answer;
+      rawStatus = args.status;
     } else if (data && typeof data === 'object') {
       // Handle direct structure
-      finalData = {
-        reasoning: data.reasoning || "Task completed",
-        completedSteps: data.completedSteps || data.completed_steps || ["Completed"],
-        answer: data.answer || "",
-        status: data.status || AgentStatesEnum.COMPLETED,
-      };
-    } else {
-      // Fallback for unexpected structures
-      finalData = {
-        reasoning: "Task completed",
-        completedSteps: ["Completed"],
-        answer: typeof data === 'string' ? data : JSON.stringify(data),
-        status: AgentStatesEnum.COMPLETED,
-      };
+      rawReasoning = data.reasoning;
+      rawCompletedSteps = data.completedSteps || data.completed_steps;
+      rawAnswer = data.answer;
+      rawStatus = data.status;
+    } else if (typeof data === 'string') {
+      // If data is a string, use it as answer
+      rawAnswer = data;
     }
     
-    // Ensure we have a valid answer
-    if (!finalData.answer) {
-      throw new Error("FinalAnswerTool: answer is required");
-    }
+    // Provide default values (matches Python Pydantic validation behavior)
+    const reasoning = rawReasoning || "Task completed";
+    const completedSteps = rawCompletedSteps || ["Completed"];
+    // Use reasoning as fallback if answer is missing (some models don't provide answer field)
+    // If both are missing, use a default message
+    const answer = rawAnswer || (rawReasoning ? rawReasoning : "Task completed successfully");
+    const status = rawStatus || AgentStatesEnum.COMPLETED;
     
-    // Set state to COMPLETED if not explicitly set to FAILED
-    if (!finalData.status || finalData.status !== AgentStatesEnum.FAILED) {
-      finalData.status = AgentStatesEnum.COMPLETED;
-    }
+    const finalStatus = status !== AgentStatesEnum.FAILED ? AgentStatesEnum.COMPLETED : AgentStatesEnum.FAILED;
+    
+    const finalData: FinalAnswerToolData = {
+      reasoning,
+      completedSteps,
+      answer,
+      status: finalStatus,
+    };
     
     // CRITICAL: Set context state to COMPLETED to stop execution loop
-    context.state = finalData.status;
-    context.executionResult = finalData.answer;
+    context.state = finalStatus;
+    context.executionResult = answer;
     
     return JSON.stringify(finalData, null, 2);
   }
