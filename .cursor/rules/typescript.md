@@ -49,7 +49,10 @@
 
 ## Documentation
 
-- All comments and documentation in English
+- **All comments and documentation MUST be in English only**
+- **NO emojis in code comments, documentation, or commit messages**
 - Use JSDoc comments for public APIs
 - Document complex logic and algorithms
 - Keep README up to date with examples
+- Write clear, concise comments that explain "why" not just "what"
+- Write clear, concise comments that explain "why" not just "what"

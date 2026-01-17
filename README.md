@@ -8,80 +8,326 @@ This library provides base classes and tools for creating intelligent agents tha
 
 ## Features
 
-- ✅ Base classes for creating agents (`BaseAgent`)
-- ✅ Tool system (`BaseTool`)
-- ✅ Ready-to-use agent example (`SGRAgent`)
-- ✅ Example tools (`ReasoningTool`, `FinalAnswerTool`)
-- ✅ Simple configuration through constructors
-- ✅ Full TypeScript typing
+- Base classes for creating agents (`BaseAgent`)
+- Tool system (`BaseTool`)
+- Ready-to-use agent example (`SGRAgent`)
+- Example tools (`ReasoningTool`, `FinalAnswerTool`)
+- Simple configuration through constructors
+- Full TypeScript typing
 
 ## Installation
 
+### Install as npm package
+
 ```bash
+npm install sgr-agent-core
+```
+
+After installation, the library is ready to use. All necessary TypeScript types are included.
+
+**If the package is not yet published to npm**, use local installation:
+
+```bash
+# First, build the project
+cd /path/to/sgr-agent-core.js
+npm install
+npm run build
+
+# Then in your project
+npm install /path/to/sgr-agent-core.js
+```
+
+### Development installation
+
+```bash
+git clone <repository-url>
+cd sgr-agent-core.js
 npm install
 npm run build
 ```
 
-## Quick Start
+## Using the Library
 
-### Simple Example
+After installing the package (`npm install sgr-agent-core`), you can use the library in your project.
+
+### What to do after installation?
+
+1. **Install dependencies** (if not already installed):
+   ```bash
+   npm install openai zod
+   ```
+
+2. **Set up environment variables**:
+   ```bash
+   export OPENAI_API_KEY=your-api-key
+   ```
+
+3. **Import necessary classes and functions** from the package:
+   ```typescript
+   import { SGRAgent, createOpenAIClient, AgentConfig } from "sgr-agent-core";
+   import { ReasoningTool, FinalAnswerTool } from "sgr-agent-core";
+   ```
+
+4. **Create and run the agent** (see examples below)
+
+### Minimal Example (3 steps)
 
 ```typescript
-import OpenAI from "openai";
-import { SGRAgent, AgentConfig } from "./src";
-import { ReasoningTool, FinalAnswerTool } from "./src/tools";
+import { SGRAgent, createOpenAIClient, ReasoningTool, FinalAnswerTool } from "sgr-agent-core";
 
-// Initialize OpenAI client (with optional proxy support)
-import { createOpenAIClient } from "./src";
-
-const openaiClient = createOpenAIClient({
+// 1. Create OpenAI client
+const client = createOpenAIClient({
   apiKey: process.env.OPENAI_API_KEY!,
-  proxy: process.env.OPENAI_PROXY, // Optional: "http://127.0.0.1:8080" or "socks5://127.0.0.1:1080"
+  model: "gpt-4o-mini",
 });
 
-// Configure agent
-const agentConfig: AgentConfig = {
-  llm: {
+// 2. Create agent
+const agent = new SGRAgent(
+  [{ role: "user", content: "What is 2+2?" }],
+  client,
+  { llm: { apiKey: process.env.OPENAI_API_KEY!, model: "gpt-4o-mini" } },
+  [new ReasoningTool(), new FinalAnswerTool()]
+);
+
+// 3. Execute agent
+const result = await agent.execute();
+console.log(result);
+```
+
+### Basic Example
+
+```typescript
+import { 
+  SGRAgent, 
+  createOpenAIClient, 
+  AgentConfig,
+  ReasoningTool,
+  FinalAnswerTool 
+} from "sgr-agent-core";
+
+async function main() {
+  // 1. Set up OpenAI client
+  const openaiClient = createOpenAIClient({
     apiKey: process.env.OPENAI_API_KEY!,
     model: "gpt-4o-mini",
-    temperature: 0.4,
-    maxTokens: 8000,
-  },
-  execution: {
-    maxIterations: 10,
-    maxClarifications: 3,
-  },
-  prompts: {
-    systemPrompt: `You are a helpful AI assistant.
+    // Optional: proxy for proxying requests
+    // proxy: "http://127.0.0.1:8080",
+  });
+
+  // 2. Configure agent
+  const agentConfig: AgentConfig = {
+    llm: {
+      apiKey: process.env.OPENAI_API_KEY!,
+      model: "gpt-4o-mini",
+      temperature: 0.4,
+      maxTokens: 8000,
+    },
+    execution: {
+      maxIterations: 10,
+      maxClarifications: 3,
+    },
+    prompts: {
+      systemPrompt: `You are a helpful AI assistant.
 
 Available tools:
 {available_tools}
 
 Use the reasoning tool first to analyze the task.`,
-    initialUserRequest: `Current date: {current_date}`,
-  },
-};
+      initialUserRequest: `Current date: {current_date}`,
+    },
+  };
 
-// Create toolkit
-const toolkit = [
-  new ReasoningTool(),
-  new FinalAnswerTool(),
-];
+  // 3. Create toolkit
+  const toolkit = [
+    new ReasoningTool(),
+    new FinalAnswerTool(),
+  ];
 
-// Create agent
-const agent = new SGRAgent(
-  [{ role: "user", content: "What is 2+2? Provide a detailed explanation." }],
-  openaiClient,
-  agentConfig,
-  toolkit
-);
+  // 4. Create agent
+  const agent = new SGRAgent(
+    [{ role: "user", content: "What is 2+2? Provide a detailed explanation." }],
+    openaiClient,
+    agentConfig,
+    toolkit
+  );
 
-// Execute
-const result = await agent.execute();
-console.log(result);
+  // 5. Execute agent
+  const result = await agent.execute();
+  console.log(result);
+}
+
+main().catch(console.error);
 ```
 
-Run the example:
+### Full Example with Web Search
+
+```typescript
+import { 
+  SGRAgent, 
+  createOpenAIClient, 
+  AgentConfig,
+  ReasoningTool,
+  FinalAnswerTool,
+  WebSearchTool,
+  ExtractPageContentTool,
+  GeneratePlanTool,
+  AdaptPlanTool,
+  ClarificationTool,
+  CreateReportTool
+} from "sgr-agent-core";
+
+async function main() {
+  // Set up client
+  const openaiClient = createOpenAIClient({
+    apiKey: process.env.OPENAI_API_KEY!,
+    model: "gpt-4o-mini",
+  });
+
+  // Configuration with web search
+  const agentConfig: AgentConfig = {
+    llm: {
+      apiKey: process.env.OPENAI_API_KEY!,
+      model: "gpt-4o-mini",
+      temperature: 0.4,
+      maxTokens: 8000,
+    },
+    execution: {
+      maxIterations: 10,
+      maxClarifications: 3,
+    },
+    search: {
+      tavilyApiKey: process.env.TAVILY_API_KEY, // Optional: for web search
+      maxResults: 10,
+    },
+    prompts: {
+      systemPrompt: `You are a helpful AI assistant that can search the web and provide answers.
+
+Available tools:
+{available_tools}
+
+Use the reasoning tool first to analyze the task.`,
+      initialUserRequest: `Current date: {current_date}`,
+    },
+  };
+
+  // Full toolkit
+  const toolkit = [
+    new ReasoningTool(),
+    new GeneratePlanTool(),
+    new AdaptPlanTool(),
+    new WebSearchTool(),
+    new ExtractPageContentTool(),
+    new ClarificationTool(),
+    new CreateReportTool(),
+    new FinalAnswerTool(),
+  ];
+
+  // Create and execute agent
+  const agent = new SGRAgent(
+    [{ role: "user", content: "What is the latest news about AI?" }],
+    openaiClient,
+    agentConfig,
+    toolkit
+  );
+
+  const result = await agent.execute();
+  console.log(result);
+}
+
+main().catch(console.error);
+```
+
+### Streaming Example
+
+```typescript
+import { 
+  SGRAgent, 
+  createOpenAIClient, 
+  AgentConfig,
+  StreamingCallback,
+  ReasoningTool,
+  FinalAnswerTool
+} from "sgr-agent-core";
+
+async function main() {
+  const openaiClient = createOpenAIClient({
+    apiKey: process.env.OPENAI_API_KEY!,
+    model: "gpt-4o-mini",
+  });
+
+  // Set up streaming callback
+  const streamingCallback: StreamingCallback = {
+    onChunk: (chunk: string) => {
+      process.stdout.write(chunk); // Output chunks in real-time
+    },
+    onToolCall: (toolCallId: string, toolName: string, toolArguments: string) => {
+      console.log(`\n[Tool Call] ${toolName} (${toolCallId})`);
+    },
+    onFinish: (finalContent: string) => {
+      console.log("\n[Stream finished]");
+    },
+  };
+
+  const agentConfig: AgentConfig = {
+    llm: {
+      apiKey: process.env.OPENAI_API_KEY!,
+      model: "gpt-4o-mini",
+      temperature: 0.4,
+      maxTokens: 8000,
+    },
+    execution: {
+      maxIterations: 10,
+      enableStreaming: true, // Enable streaming
+    },
+    prompts: {
+      systemPrompt: `You are a helpful AI assistant.
+
+Available tools:
+{available_tools}`,
+      initialUserRequest: `Current date: {current_date}`,
+    },
+  };
+
+  const toolkit = [
+    new ReasoningTool(),
+    new FinalAnswerTool(),
+  ];
+
+  // Pass streamingCallback to constructor
+  const agent = new SGRAgent(
+    [{ role: "user", content: "Explain quantum computing in simple terms." }],
+    openaiClient,
+    agentConfig,
+    toolkit,
+    undefined, // name
+    undefined, // logger
+    streamingCallback // streaming callback
+  );
+
+  const result = await agent.execute();
+  console.log("\n=== Final Result ===");
+  console.log(result);
+}
+
+main().catch(console.error);
+```
+
+### Environment Variables
+
+Create a `.env` file or set environment variables:
+
+```bash
+export OPENAI_API_KEY=your-openai-api-key
+export OPENAI_MODEL=gpt-4o-mini  # optional
+export OPENAI_BASE_URL=https://api.openai.com/v1  # optional
+export OPENAI_PROXY=http://127.0.0.1:8080  # optional
+export TAVILY_API_KEY=your-tavily-api-key  # optional, for web search
+export ENABLE_STREAMING=true  # optional
+```
+
+## Quick Start (for library developers)
+
+### Run example
 
 ```bash
 export OPENAI_API_KEY=your-api-key
@@ -120,7 +366,7 @@ Interface for tools that agents can use. Each tool must implement:
 ## Creating Your Own Agent
 
 ```typescript
-import { BaseAgent, BaseTool, AgentConfig } from "./src";
+import { BaseAgent, BaseTool, AgentConfig } from "sgr-agent-core";
 import OpenAI from "openai";
 
 class MyAgent extends BaseAgent {
@@ -179,16 +425,14 @@ class MyAgent extends BaseAgent {
 ## Creating Your Own Tool
 
 ```typescript
-import { BaseTool } from "./src/base-tool";
-import { AgentConfig } from "./src/config";
-import * as models from "./src/models";
+import { BaseTool, AgentConfig, AgentContext } from "sgr-agent-core";
 
 class MyTool implements BaseTool {
   toolName = "my_tool";
   description = "Description of my tool for LLM";
 
   async execute(
-    context: models.AgentContext,
+    context: AgentContext,
     config: AgentConfig,
     data: any
   ): Promise<string> {
@@ -207,7 +451,7 @@ class MyTool implements BaseTool {
 The library supports streaming responses from the LLM for real-time output:
 
 ```typescript
-import { SGRAgent, createOpenAIClient, StreamingCallback } from "./src";
+import { SGRAgent, createOpenAIClient, StreamingCallback } from "sgr-agent-core";
 
 const streamingCallback: StreamingCallback = {
   onChunk: (chunk: string) => {
@@ -295,7 +539,7 @@ The library supports proxy configuration for OpenAI API requests. To use a proxy
 
 3. Use `createOpenAIClient` helper function:
    ```typescript
-   import { createOpenAIClient } from "./src";
+   import { createOpenAIClient } from "sgr-agent-core";
    
    const openaiClient = createOpenAIClient(agentConfig.llm);
    ```
@@ -306,10 +550,59 @@ Supported proxy formats:
 - `socks5://host:port` - SOCKS5 proxy
 - `socks4://host:port` - SOCKS4 proxy
 
+## Available Exports
+
+The library exports the following main classes and types:
+
+### Agents
+- `SGRAgent` - ready-to-use SGR agent
+- `BaseAgent` - base class for creating custom agents
+
+### Tools
+- `ReasoningTool` - reasoning tool
+- `FinalAnswerTool` - final answer tool
+- `WebSearchTool` - web search tool (requires Tavily API)
+- `ExtractPageContentTool` - page content extraction tool
+- `GeneratePlanTool` - plan generation tool
+- `AdaptPlanTool` - plan adaptation tool
+- `ClarificationTool` - clarification request tool
+- `CreateReportTool` - report creation tool
+- `BaseTool` - base interface for creating custom tools
+
+### Utilities
+- `createOpenAIClient(config)` - create OpenAI client with proxy support
+- `StreamingCallback` - streaming interface
+- `StreamingHandler` - streaming handler
+
+### Types and Configuration
+- `AgentConfig` - agent configuration
+- `LLMConfig` - LLM configuration
+- `ExecutionConfig` - execution configuration
+- `AgentContext` - agent execution context
+- `AgentStatesEnum` - agent states
+
+### Import Examples
+
+```typescript
+// Import main classes
+import { SGRAgent, createOpenAIClient, AgentConfig } from "sgr-agent-core";
+
+// Import tools
+import { 
+  ReasoningTool, 
+  FinalAnswerTool, 
+  WebSearchTool 
+} from "sgr-agent-core";
+
+// Import types
+import type { StreamingCallback, AgentContext } from "sgr-agent-core";
+```
+
 ## Examples
 
 See the `examples/` folder for more detailed usage examples:
-- `simple-agent.ts` - simple example of using SGRAgent
+- `simple-agent.ts` - simple example of using SGRAgent (for development)
+- `usage-example.ts` - example showing how to use the library after npm install
 
 ## Differences from Python Version
 
