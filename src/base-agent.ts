@@ -27,7 +27,7 @@ export abstract class BaseAgent {
   public readonly toolkit: BaseTool[];
   public readonly config: AgentConfig;
   protected readonly openaiClient: OpenAI;
-  protected readonly context: models.AgentContext;
+  public readonly context: models.AgentContext;
   protected conversation: ChatCompletionMessageParam[] = [];
   protected log: any[] = [];
   protected logger: AgentLogger;

@@ -249,9 +249,157 @@ export class SGRAgent extends BaseAgent {
     return tool;
   }
 
+  /**
+   * Check if error is a validation/format error that should be retried.
+   */
+  private isValidationError(error: any): boolean {
+    if (!error || !error.message) {
+      return false;
+    }
+    const message = error.message.toLowerCase();
+    // Check for common validation error patterns
+    return (
+      message.includes("required") ||
+      message.includes("missing") ||
+      message.includes("invalid") ||
+      message.includes("format") ||
+      message.includes("validation")
+    );
+  }
+
+  /**
+   * Retry tool execution with LLM call when validation errors occur.
+   */
+  private async retryToolExecution(
+    tool: BaseTool,
+    toolData: any,
+    toolCallId: string,
+    retryCount: number
+  ): Promise<string> {
+    this.logger.info(`Retrying tool execution (attempt ${retryCount + 1}): ${tool.toolName}`);
+    
+    // Prepare context with error message
+    const messages = await this.prepareContext();
+    const errorMessage = `Previous tool execution failed with validation error. Please provide all required fields for ${tool.toolName}. Required fields: ${tool.description.substring(0, 200)}`;
+    
+    // Add error context to messages
+    const messagesWithError = [
+      ...messages,
+      {
+        role: "assistant" as const,
+        content: null,
+        tool_calls: [
+          {
+            type: "function" as const,
+            id: toolCallId,
+            function: {
+              name: tool.toolName,
+              arguments: JSON.stringify(toolData),
+            },
+          },
+        ],
+      },
+      {
+        role: "tool" as const,
+        content: `Error: ${(this.context as any).lastToolError || "Validation error"}. Please provide all required fields.`,
+        tool_call_id: toolCallId,
+      },
+      {
+        role: "user" as const,
+        content: errorMessage,
+      },
+    ];
+
+    const tools = await this.prepareTools();
+    const responseFormat = await this.prepareResponseFormat();
+    const enableStreaming = this.config.execution?.enableStreaming || false;
+
+    let response: any;
+    if (enableStreaming) {
+      const stream = await this.openaiClient.chat.completions.create({
+        model: this.config.llm.model,
+        messages: messagesWithError,
+        response_format: responseFormat,
+        temperature: this.config.llm.temperature || 0.4,
+        max_tokens: this.config.llm.maxTokens || 8000,
+        stream: true,
+      });
+
+      const streamingHandler = new StreamingHandler(this.streamingCallback);
+      let finalContent = "";
+      
+      for await (const chunk of stream) {
+        streamingHandler.handleChunk(chunk);
+        const delta = chunk.choices?.[0]?.delta;
+        if (delta?.content) {
+          finalContent += delta.content;
+        }
+      }
+
+      streamingHandler.finish();
+      
+      if (!finalContent) {
+        throw new Error("No content in retry response");
+      }
+
+      try {
+        response = {
+          choices: [{
+            message: {
+              content: finalContent,
+            },
+          }],
+        };
+      } catch (error) {
+        throw new Error(`Failed to parse retry response: ${error}`);
+      }
+    } else {
+      response = await this.openaiClient.chat.completions.create({
+        model: this.config.llm.model,
+        messages: messagesWithError,
+        response_format: responseFormat,
+        temperature: this.config.llm.temperature || 0.4,
+        max_tokens: this.config.llm.maxTokens || 8000,
+      });
+    }
+
+    const message = response.choices[0].message;
+    
+    if (!message.content) {
+      throw new Error("No content in retry response");
+    }
+
+    let retryToolData: any;
+    try {
+      retryToolData = JSON.parse(message.content);
+    } catch (error) {
+      throw new Error(`Failed to parse retry response: ${error}`);
+    }
+
+    // Extract tool data from retry response
+    const retryFunction = retryToolData.function || retryToolData;
+    let finalArgs: any;
+    
+    if (retryFunction.arguments) {
+      if (typeof retryFunction.arguments === 'string') {
+        try {
+          finalArgs = JSON.parse(retryFunction.arguments);
+        } catch {
+          finalArgs = retryFunction.arguments;
+        }
+      } else {
+        finalArgs = retryFunction.arguments;
+      }
+    } else {
+      const { toolName, ...args } = retryFunction;
+      finalArgs = args;
+    }
+
+    return await tool.execute(this.context, this.config, finalArgs);
+  }
+
   protected async actionPhase(tool: BaseTool): Promise<string> {
-    // In Python version, tool is called directly with data from reasoning.function
-    // We already have the tool data from selectActionPhase
+    const maxRetries = this.config.execution?.maxToolRetries ?? 2;
     const toolData = (this.context as any).currentToolData;
     const toolCallId = (this.context as any).currentToolCallId || `${this.context.iteration}-action`;
 
@@ -259,47 +407,86 @@ export class SGRAgent extends BaseAgent {
       throw new Error("Tool data not found in context. This should not happen.");
     }
 
-    // Execute tool with data from reasoning.function (matches Python version)
-    // Remove toolName from args as it's not part of tool data
+    // Handle different data structures
     let finalArgs: any;
     
-    // Handle different data structures
     if (toolData.arguments) {
-      // If arguments is a string, parse it
       if (typeof toolData.arguments === 'string') {
         try {
           finalArgs = JSON.parse(toolData.arguments);
         } catch {
-          // If parsing fails, use the string as-is
           finalArgs = { answer: toolData.arguments };
         }
       } else if (typeof toolData.arguments === 'object') {
-        // If arguments is an object, use it directly
         finalArgs = toolData.arguments;
       } else {
         finalArgs = toolData.arguments;
       }
     } else {
-      // No arguments field, use all fields except toolName
       const { toolName, ...args } = toolData;
       finalArgs = args;
     }
-    
-    const result = await tool.execute(this.context, this.config, finalArgs);
-    
-    // Add tool result message (already added assistant message in selectActionPhase)
-    this.conversation.push({
-      role: "tool",
-      content: result,
-      tool_call_id: toolCallId,
-    });
 
-    this.logToolExecution(tool, result);
-    
-    // Clean up temporary context data
-    delete (this.context as any).currentToolData;
-    delete (this.context as any).currentToolCallId;
-    
-    return result;
+    // Try to execute tool with retry logic for validation errors
+    let lastError: any = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const result = await tool.execute(this.context, this.config, finalArgs);
+        
+        // Success - add tool result message
+        this.conversation.push({
+          role: "tool",
+          content: result,
+          tool_call_id: toolCallId,
+        });
+
+        this.logToolExecution(tool, result);
+        
+        // Clean up temporary context data
+        delete (this.context as any).currentToolData;
+        delete (this.context as any).currentToolCallId;
+        delete (this.context as any).lastToolError;
+        
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        
+        // Check if this is a validation error and we have retries left
+        if (this.isValidationError(error) && attempt < maxRetries) {
+          (this.context as any).lastToolError = error.message;
+          try {
+            const result = await this.retryToolExecution(tool, toolData, toolCallId, attempt);
+            
+            // Success after retry
+            this.conversation.push({
+              role: "tool",
+              content: result,
+              tool_call_id: toolCallId,
+            });
+
+            this.logToolExecution(tool, result);
+            
+            // Clean up temporary context data
+            delete (this.context as any).currentToolData;
+            delete (this.context as any).currentToolCallId;
+            delete (this.context as any).lastToolError;
+            
+            return result;
+          } catch (retryError: any) {
+            // Retry also failed, continue to next attempt or throw
+            if (attempt === maxRetries) {
+              throw retryError;
+            }
+            (this.context as any).lastToolError = retryError.message;
+          }
+        } else {
+          // Not a validation error or no retries left - throw immediately
+          throw error;
+        }
+      }
+    }
+
+    // All retries exhausted
+    throw lastError || new Error("Tool execution failed after all retries");
   }
 }

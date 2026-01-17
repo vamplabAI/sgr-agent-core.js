@@ -31,6 +31,12 @@ export interface ExecutionConfig {
    * Default: "reports"
    */
   reportsDir?: string;
+  /**
+   * Maximum number of retries for tool execution when validation errors occur.
+   * Retries are only performed for format/validation errors, not for other errors.
+   * Default: 2
+   */
+  maxToolRetries?: number;
 }
 
 /**
