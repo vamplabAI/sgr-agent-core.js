@@ -55,13 +55,9 @@ export class FinalAnswerTool implements BaseTool {
       };
     }
     
-    // Provide default answer if missing (try to extract from reasoning or use fallback)
+    // Validate that answer is provided - throw validation error to trigger retry
     if (!finalData.answer || finalData.answer.trim() === "") {
-      // Try to extract answer from reasoning or use a default
-      const defaultAnswer = finalData.reasoning 
-        ? `Based on the reasoning: ${finalData.reasoning.substring(0, 200)}`
-        : "Task completed successfully";
-      finalData.answer = defaultAnswer;
+      throw new Error("final_answer: answer field is required and cannot be empty. Please provide a complete answer to the user's question.");
     }
     
     // Set state to COMPLETED if not explicitly set to FAILED

@@ -188,7 +188,7 @@ describe("SGRAgent - Retry Mechanism", () => {
         [{ role: "user", content: "What is 2+2?" }],
         mockClient as any,
         agentConfig,
-        [new ReasoningTool(), new FinalAnswerTool()]
+        [new ReasoningTool(), new FinalAnswerTool(), new ValidationErrorTool()]
       );
 
       // Should fail after all retries
@@ -307,8 +307,8 @@ describe("SGRAgent - Retry Mechanism", () => {
       const result = await agent.execute();
       
       expect(result).toBeTruthy();
-      // Should succeed on first attempt (FinalAnswerTool handles missing fields gracefully)
-      expect(mockClient.chat.completions.create).toHaveBeenCalledTimes(1);
+      // Should succeed after retry (FinalAnswerTool throws validation error when answer is missing)
+      expect(mockClient.chat.completions.create).toHaveBeenCalledTimes(2);
     });
 
     it("should succeed on first attempt when data is valid", async () => {

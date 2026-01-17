@@ -268,14 +268,14 @@ export class SGRAgent extends BaseAgent {
   }
 
   /**
-   * Retry tool execution with LLM call when validation errors occur.
+   * Get retry tool data from LLM when validation errors occur.
    */
-  private async retryToolExecution(
+  private async getRetryToolData(
     tool: BaseTool,
     toolData: any,
     toolCallId: string,
     retryCount: number
-  ): Promise<string> {
+  ): Promise<any> {
     this.logger.info(`Retrying tool execution (attempt ${retryCount + 1}): ${tool.toolName}`);
     
     // Prepare context with error message
@@ -395,7 +395,7 @@ export class SGRAgent extends BaseAgent {
       finalArgs = args;
     }
 
-    return await tool.execute(this.context, this.config, finalArgs);
+    return retryToolData;
   }
 
   protected async actionPhase(tool: BaseTool): Promise<string> {
@@ -455,29 +455,38 @@ export class SGRAgent extends BaseAgent {
         if (this.isValidationError(error) && attempt < maxRetries) {
           (this.context as any).lastToolError = error.message;
           try {
-            const result = await this.retryToolExecution(tool, toolData, toolCallId, attempt);
+            // Get retry data from LLM
+            const retryData = await this.getRetryToolData(tool, toolData, toolCallId, attempt);
             
-            // Success after retry
-            this.conversation.push({
-              role: "tool",
-              content: result,
-              tool_call_id: toolCallId,
-            });
-
-            this.logToolExecution(tool, result);
+            // Extract tool data from retry response (same logic as in getRetryToolData)
+            const retryFunction = retryData.function || retryData;
             
-            // Clean up temporary context data
-            delete (this.context as any).currentToolData;
-            delete (this.context as any).currentToolCallId;
-            delete (this.context as any).lastToolError;
+            // Update finalArgs with retry data
+            if (retryFunction.arguments) {
+              if (typeof retryFunction.arguments === 'string') {
+                try {
+                  finalArgs = JSON.parse(retryFunction.arguments);
+                } catch {
+                  finalArgs = retryFunction.arguments;
+                }
+              } else {
+                finalArgs = retryFunction.arguments;
+              }
+            } else {
+              const { toolName, ...args } = retryFunction;
+              finalArgs = args;
+            }
             
-            return result;
+            // Try again with updated args (will be caught by outer try-catch)
+            continue;
           } catch (retryError: any) {
-            // Retry also failed, continue to next attempt or throw
+            // Retry request failed, throw if last attempt
             if (attempt === maxRetries) {
               throw retryError;
             }
             (this.context as any).lastToolError = retryError.message;
+            // Continue to next attempt
+            continue;
           }
         } else {
           // Not a validation error or no retries left - throw immediately

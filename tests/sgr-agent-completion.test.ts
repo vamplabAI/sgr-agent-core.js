@@ -80,7 +80,7 @@ describe("SGRAgent Completion", () => {
         [{ role: "user", content: "What is 2+2?" }],
         mockClient as any,
         agentConfig,
-        [ReasoningTool, FinalAnswerTool]
+        [new ReasoningTool(), new FinalAnswerTool()]
       );
 
       const result = await agent.execute();
@@ -125,7 +125,7 @@ describe("SGRAgent Completion", () => {
         [{ role: "user", content: "What is 2+2?" }],
         mockClient as any,
         agentConfig,
-        [ReasoningTool, FinalAnswerTool]
+        [new ReasoningTool(), new FinalAnswerTool()]
       );
 
       const result = await agent.execute();
@@ -167,7 +167,7 @@ describe("SGRAgent Completion", () => {
         [{ role: "user", content: "Test question" }],
         mockClient as any,
         agentConfig,
-        [ReasoningTool, FinalAnswerTool]
+        [new ReasoningTool(), new FinalAnswerTool()]
       );
 
       const result = await agent.execute();
