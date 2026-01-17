@@ -23,10 +23,52 @@ export class FinalAnswerTool implements BaseTool {
   async execute(
     context: AgentContext,
     config: AgentConfig,
-    data: FinalAnswerToolData
+    data: FinalAnswerToolData | any
   ): Promise<string> {
-    context.state = data.status;
-    context.executionResult = data.answer;
-    return JSON.stringify(data, null, 2);
+    // Handle different data structures (some LLMs return nested structures)
+    let finalData: FinalAnswerToolData;
+    
+    if (data && data.arguments && typeof data.arguments === 'object') {
+      // Handle nested structure: { arguments: { answer: "...", ... } }
+      const args = data.arguments;
+      finalData = {
+        reasoning: args.reasoning || "Task completed",
+        completedSteps: args.completedSteps || args.completed_steps || ["Completed"],
+        answer: args.answer || "",
+        status: args.status || AgentStatesEnum.COMPLETED,
+      };
+    } else if (data && typeof data === 'object') {
+      // Handle direct structure
+      finalData = {
+        reasoning: data.reasoning || "Task completed",
+        completedSteps: data.completedSteps || data.completed_steps || ["Completed"],
+        answer: data.answer || "",
+        status: data.status || AgentStatesEnum.COMPLETED,
+      };
+    } else {
+      // Fallback for unexpected structures
+      finalData = {
+        reasoning: "Task completed",
+        completedSteps: ["Completed"],
+        answer: typeof data === 'string' ? data : JSON.stringify(data),
+        status: AgentStatesEnum.COMPLETED,
+      };
+    }
+    
+    // Ensure we have a valid answer
+    if (!finalData.answer) {
+      throw new Error("FinalAnswerTool: answer is required");
+    }
+    
+    // Set state to COMPLETED if not explicitly set to FAILED
+    if (!finalData.status || finalData.status !== AgentStatesEnum.FAILED) {
+      finalData.status = AgentStatesEnum.COMPLETED;
+    }
+    
+    // CRITICAL: Set context state to COMPLETED to stop execution loop
+    context.state = finalData.status;
+    context.executionResult = finalData.answer;
+    
+    return JSON.stringify(finalData, null, 2);
   }
 }

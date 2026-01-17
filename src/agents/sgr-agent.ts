@@ -261,9 +261,31 @@ export class SGRAgent extends BaseAgent {
 
     // Execute tool with data from reasoning.function (matches Python version)
     // Remove toolName from args as it's not part of tool data
-    const { toolName, ...args } = toolData;
+    let finalArgs: any;
     
-    const result = await tool.execute(this.context, this.config, args);
+    // Handle different data structures
+    if (toolData.arguments) {
+      // If arguments is a string, parse it
+      if (typeof toolData.arguments === 'string') {
+        try {
+          finalArgs = JSON.parse(toolData.arguments);
+        } catch {
+          // If parsing fails, use the string as-is
+          finalArgs = { answer: toolData.arguments };
+        }
+      } else if (typeof toolData.arguments === 'object') {
+        // If arguments is an object, use it directly
+        finalArgs = toolData.arguments;
+      } else {
+        finalArgs = toolData.arguments;
+      }
+    } else {
+      // No arguments field, use all fields except toolName
+      const { toolName, ...args } = toolData;
+      finalArgs = args;
+    }
+    
+    const result = await tool.execute(this.context, this.config, finalArgs);
     
     // Add tool result message (already added assistant message in selectActionPhase)
     this.conversation.push({
